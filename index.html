@@ -1,0 +1,504 @@
+<!doctype html>
+<html lang="en">	
+<head>
+	<meta charset="utf-8">
+	<title>GHG SQL</title>
+	<link rel="stylesheet" href="css/reveal.min.css">
+	<link rel="stylesheet" href="css/theme/default.css" id="theme">	
+</head>
+
+<body>
+	<div class="reveal">
+		<div class="slides">
+      <section>
+        <h2>SQL for fun and profit</h2>
+				<p> Robert Ulejczyk </p>
+			</section>
+
+      <section>
+        <p>Pretty much every query can be executed on sample "world" database.</p>
+        <br/>
+        <p>Get it here:<br/> <a href="http://pgfoundry.org/projects/dbsamples/">http://pgfoundry.org/projects/dbsamples/</a><p>
+        <br/>
+        <p>And then:</p>
+        <pre><code>
+          psql your_datatabse_name -f world.sql
+        </code></pre>
+			</section>
+
+      <section>
+        <section>
+          <h2>Table aliases</h2>
+          <br/>
+          <p>Stupid simple</p>
+        </section>
+        <section>
+          <p>Instead of:</p>
+          <pre><code>
+            SELECT * FROM country
+              WHERE country.code LIKE 'A%';
+          </code></pre>
+          <p>do this:</p>
+          <pre><code>
+            SELECT * FROM country c
+              WHERE c.code LIKE 'A%';
+          </code></pre>
+        </section>
+        <section>
+          <p>Rails alias tables when you do JOIN pretty much always, that's why it
+             produce ugly queries.</p>
+          <p> You need to use prefix when one column exists
+             in 2 tables used in query.</p>
+          <pre><code>
+            SELECT countrycode FROM countrylanguage cl
+              INNER JOIN city c ON cl.countrycode = c.countrycode;
+
+            -- ERROR:  column reference "countrycode" is ambiguous
+          </code></pre>
+          <pre><code>
+            SELECT c.countrycode FROM countrylanguage cl
+              INNER JOIN city c ON cl.countrycode = c.countrycode;
+
+            -- SUCCESS
+          </code></pre>
+          <br/>
+          <p>I will keep using it as we go.</p>
+        </section>
+			</section>
+
+      <section>
+        <section>
+          <h2>Subqueries</h2>
+          <br/>
+          <p>Nested queries, can be used as FROM, JOINs, WHERE conditions</p>
+        </section>
+        <section>
+          <p>with FROM:</p>
+          <pre><code>
+            SELECT *
+              FROM (SELECT * FROM country) c
+              WHERE c.code LIKE 'A%';
+          </code></pre>
+          <p>with JOIN:</p>
+          <pre><code>
+            SELECT *
+              FROM country c
+              INNER JOIN (SELECT * FROM countrylanguage) cl
+                ON c.code = cl.countrycode
+              WHERE c.code LIKE 'A%';
+          </code></pre>
+          <p>with WHERE:</p>
+          <pre><code>
+            SELECT * FROM country c
+              WHERE c.code IN (SELECT countrycode FROM countrylanguage);
+          </code></pre>
+        </section>
+        <section>
+          <p>How to find Cities that don't have matching record in Country table?</p>
+          <br/>
+          <p>First make db invalid.</p>
+          <pre><code>
+             UPADTE city SET countrycode = 'ZZZ' WHERE id = 1;
+          </code></pre>
+          <p>What now?</p>
+        </section>
+        <section>
+          <p>Rails does this type of (sub)query on <i>#exists?</i></p>
+          <pre><code>
+            SELECT * FROM city
+            WHERE NOT EXISTS (
+              SELECT 1 FROM country
+                WHERE city.countrycode = country.code
+                LIMIT 1);
+          </code></pre>
+          <ul>
+            <li><i>1</i> in SQL evaluates to `true`, SQL won't read real data from disk.</li>
+            <li><i>LIMIT 1</i> aborts the query on first result.</li>
+            <li>It's optimal, won't be better.</li>
+          </ul>
+          <hr/>
+          <p>Rails support subqueries, but we need to write it as string.</p>
+        </code>
+        </section>
+			</section>
+
+			<section>
+        <section>
+				  <h2>Common Table Expressions (CTE)</h2>
+          <p>(also known as WITH queries)</p>
+          <br/>
+          <p>It's almost syntatic sugar for making big queries with nested subqueries easier to read.</p>
+        </section>
+        <section>
+          <p>Given following (small) query:</p>
+          <pre><code>
+            SELECT * FROM (
+              SELECT * FROM country
+                INNER JOIN city ON city.id = country.capital
+                WHERE city.population > 500000
+            ) countries_with_capital
+            WHERE indepyear > 1960;
+          </code></pre>
+        </section>
+        <section>
+          <p>It can be rewritten using CTE:</p>
+          <pre><code>
+            -- CTE starts here
+            WITH countries_with_capital AS (
+              SELECT * FROM country
+                INNER JOIN city ON city.id = country.capital
+                WHERE city.population > 500000
+            )
+            -- ends here
+
+            -- real query begins
+            SELECT * FROM countries_with_capital
+            WHERE indepyear > 1960;
+          </code></pre>
+        </section>
+        <section>
+          <p>Getting better</p>
+          <pre><code>
+            SELECT c.* FROM  (
+              SELECT * FROM country
+                INNER JOIN city
+                  ON city.id = country.capital
+                WHERE city.population > 500000 ) c
+              INNER JOIN (
+                SELECT * FROM country c
+                  INNER JOIN countrylanguage l
+                    ON c.code = l.countrycode
+                  WHERE percentage > 50
+              ) l on c.code = l.code
+              WHERE c.indepyear > 1960;
+          </code></pre>
+        </section>
+        <section>
+          <pre><code>
+            WITH countries_with_capital AS (
+              SELECT * FROM country
+                INNER JOIN city ON city.id = country.capital
+                WHERE city.population > 500000
+            ),
+            countries_with_language AS (
+              SELECT * FROM country c
+                INNER JOIN countrylanguage l ON c.code = l.countrycode
+                WHERE percentage > 50
+            )
+            
+            SELECT c.* FROM countries_with_capital c
+              INNER JOIN countries_with_language l on c.code = l.code
+              WHERE c.indepyear > 1960;
+          </code></pre>
+        </section>
+        <section>
+          <ul>
+            <li><p>It's longer, but makes query much easier to follow.</p></li>
+            <li><p>We can use as many CTEs as we want.</p></li>
+            <hr/>
+            <p>There is one downside.</p>
+            <hr/>
+            <li><p>It forces Query Planner to materialize CTE tables, as
+                   a result performance may not be optimal.</p></li>
+            <li><p>Usually it's not an issue.</p></li>
+            <li><p>It can be seen as upside (you have more control).</p></li>
+          </ul>
+        </section>
+        <section>
+          <p>Real example.</p>
+          <p>Find users who are likely abusing PrivateMessages system by sending over 20 pms per hour.</p>
+          <pre><code>
+            WITH messages_per_hour AS (
+              SELECT date_trunc('hour', created_at) AS hour,
+                     sender_id
+              FROM messages
+              WHERE created_at >= '2014-01-01' AND created_at < '2014-04-01'
+            )
+            SELECT count(*) AS messages_count,
+                   sender_id,
+                   hour
+            FROM messages_per_hour
+            GROUP BY sender_id, hour
+            HAVING count(*) > 20
+            ORDER BY count(*) DESC;
+          </code></pre>
+        </section>
+        <section>
+          <p>Postgres supports also recursive WITH queries, but it's outside of scope of
+             and this presentation I didn't yet had a chance to use it in real world.</p>
+          <hr/>
+          <p><a href="http://www.postgresql.org/docs/9.4/static/queries-with.html">http://www.postgresql.org/docs/9.4/static/queries-with.html</a></p>
+          <br/>
+          <p>(documentation is awesome)</p>
+        </section>
+			</section>
+      <section>
+        <section>
+          <h2>Window Functions</h2>
+          <p>It allows to aggregate data across multiple rows into single column.</p>
+          <p>It's super-duper useful and fast.</p>
+        </section>
+        <section>
+          <p>Imagine we want to rank countries based on popularity of official language.</p>
+          <pre><code>
+            WITH countries_with_language as (
+            SELECT * FROM country c
+              INNER JOIN countrylanguage cl ON c.code = cl.countrycode
+            )
+            SELECT name, language, percentage,
+                   rank() OVER (ORDER BY percentage DESC) --window function
+            FROM countries_with_language;
+          </code></pre>
+        </section>
+        <section>
+          <p>That is good, but we could do better.</p>
+          <br/>
+          <p>Imagine we want to rank countries based on popularity of official language but
+             have separate ranking for each language.</p>
+          <pre><code>
+            WITH countries_with_language as (
+            SELECT * FROM country c
+              INNER JOIN countrylanguage cl ON c.code = cl.countrycode
+            )
+            SELECT name, language, percentage,
+                   rank() OVER (PARTITION BY language ORDER BY percentage DESC)
+            FROM countries_with_language
+            WHERE percentage > 50 --filter silly results
+            ORDER BY language, rank;
+          </code></pre>
+        </section>
+        <section>
+          <p>Find duplicate cities for each country</p>
+          <pre><code>
+            SELECT * FROM (
+              SELECT *, row_number()
+                        over(PARTITION BY countrycode ORDER BY id) AS row_number
+              FROM city
+            ) cities_with_row_number
+            WHERE row_number > 1
+            ORDER BY countrycode, id;
+          </code></pre>
+        </section>
+        <section>
+          <p>Find average population for each country (based on city population)</p>
+          <pre><code>
+            WITH cities AS (
+              SELECT *, avg(population) OVER (PARTITION BY countrycode)
+                          AS avgpopulation
+              FROM city)
+
+            SELECT DISTINCT co.name, ci.avgpopulation, co.code
+            FROM country co
+            INNER JOIN cities ci ON co.code = ci.countrycode;
+          </code></pre>
+        </section>
+        <section>
+          <ul>
+            <li>Window functions are super fast, but not free.</li>
+            <li>Be careful not to abuse it (always measure on real data!).</li>
+            <li>They are very useful when used on non-time sensitive scenarios, analytics and possibly other background
+                tasks.</p>
+          </ul>
+        </section>
+        <section>
+          <p>Check documentation for more examples and explanation:</p>
+          <p><a href="http://www.postgresql.org/docs/9.4/static/tutorial-window.html">http://www.postgresql.org/docs/9.4/static/tutorial-window.html</a></p>
+        </section>
+      </section>
+      <section>
+        <section>
+          <h2>Expressions</h2>
+          <p>(quiz)</p>
+        </section>
+        <section>
+          <p>Given that there are records with NULL in "gnpold" what will be result of this query?</p>
+          <pre><code>
+            SELECT * FROM country
+            WHERE gnp / coalesce(gnpold, 0) > 1
+              AND gnpold IS NOT NULL;
+          </code></pre>
+          <p>(protip: <i>coalesce</i> will replace NULL with 0)</p>
+        </section>
+        <section>
+          <p>And this one?</p>
+          <pre><code>
+            SELECT * FROM country
+            WHERE gnpold IS NOT NULL
+              AND gnp / coalesce(gnpold, 0) > 1;
+          </code></pre>
+        </section>
+        <section>
+          <p>And this one?</p>
+          <pre><code>
+            SELECT * FROM country
+            WHERE gnp / coalesce(gnpold, 0) > 1;
+          </code></pre>
+        </section>
+        <section>
+          <h1> ¯\_(ツ)_/¯ </h1>
+        </section>
+        <section>
+          <ul>
+            <li>Expression conditions are not evaluated from-left-to-right. Query Planner will reorder as it thinks.</li>
+            <li>Relying on order of expression is bad idea.</li>
+            <li>Having functions with side-effects is terrible idea.</li>
+            <li>If above examples work (they should) it's only because we are lucky.</li>
+          </ul>
+        </section>
+        <section>
+          <p>To force expression order we need to use CASE statement, i.e.</p>
+          <pre><code>
+            SELECT * FROM country
+            WHERE CASE WHEN gnpold IS NULL THEN false ELSE gnp / gnpold > 1 END;
+          </code></pre>
+          <p>Query Planner won't try to optimize this so it's usually not good idea.</p>
+        </section>
+        <section>
+          <p>It's a feature, not a bug. It allows Query Planner to REALLY optimize execution plan.</p>
+          <pre><code>
+EXPLAIN ANALYZE SELECT * FROM country WHERE code LIKE '%A%' AND 1=0;
+-------------------------------------------------------------------------------
+Result  (cost=0.00..7.39 rows=1 width=113) (actual time=0.001..0.001 rows=0 loo
+-------------------------------------------------------------------------------
+  One-Time Filter: false
+-------------------------------------------------------------------------------
+  ->  Seq Scan on country  (cost=0.00..7.39 rows=1 width=113) (never executed)
+-------------------------------------------------------------------------------
+Total runtime: 0.038 ms
+
+
+
+EXPLAIN ANALYZE SELECT * FROM country WHERE 1=0;
+-------------------------------------------------------------------------------
+Result  (cost=0.00..7.39 rows=1 width=113) (actual time=0.001..0.001 rows=0 loo
+-------------------------------------------------------------------------------
+  One-Time Filter: false
+-------------------------------------------------------------------------------
+  ->  Seq Scan on country  (cost=0.00..7.39 rows=1 width=113) (never executed)
+-------------------------------------------------------------------------------
+Total runtime: 0.038 ms
+          </code></pre>
+          <p>(see Seq Scan and LIKE '%A%' are <i>never executed</i>)</p>
+        </section>
+      </section>
+      <section>
+        <section>
+          <h2>Random tips</h2>
+        </section>
+        <section>
+          <p>If you filter by function always add index with this function.</p>
+          <pre><code>
+            SELECT * FROM users where lower(email) = 'Rulejczyk@gmail.com';
+
+            -- be sure to add index
+            CREATE UNIQUE INDEX idx_lowercase_email_on_users
+                   ON users USING btree(lower(email));
+          </code></pre>
+          <p>Without this index postgres will do sequential (full table) scan evaluating this
+             funtion for each and every row.</p>
+        </section>
+        <section>
+          <p>Unique validations in application NEED to be enforced with UNIQUE INDEX.</p>
+          <br/>
+          <p>Application runs in multiple processes and can't ever guarantee that other process
+             won't insert duplicate record at the same time.</p>
+          <br/>
+          <p>It's better to serve error page to user than have inconsistent data in DB.</p>
+        </section>
+        <section>
+          <p>Performance is never <i>solved problem</i></p>
+          <br/>
+          <p>Always monitor performance in production.</p>
+          <br/>
+          <p>Query Planner adjust execution plans all the time. Just because it works today,
+             does not mean that it will work tommorow.</p>
+          <br/>
+          <p>50ms is slow.</p>
+          <br/>
+          <p>Don't partition data. (let someone else deal with it)</p>
+        </section>
+        <section>
+          <p>Expect errors in data.</p>
+          <br/>
+          <p>As a result of requirements change or bug you will have inconsistent data. 
+             Find it and fix it.</p>
+          <br/>
+          <p>You have right tools to do everything.</p>
+        </section>
+        <section>
+          <p>Don't add indexes on live database, it will write-lock the table.</p>
+          <br/>
+          <p>If you have to use <i>concurrent</i> option, it's safe.</p>
+          <pre><code>
+            class AddSlugIndexes < ActiveRecord::Migration
+              disable_ddl_transaction!
+
+              def up
+                execute "CREATE UNIQUE INDEX CONCURRENTLY
+                         index_user_slug ON users (slug);"
+              end
+            end
+          </code></pre>
+          <p>If something goes wrong Postgres won't use corrupted index. Delete and try again.</p>
+        </section>
+        <section>
+          <p>Don't try to batch generate slugs with FriendlyId for existing data. It takes AGES.</p>
+          <br/>
+          <p>Do it with SQL</p>
+          <pre><code>
+       UPDATE profiles
+       SET slug = lower(replace(replace(users.username, '.', '--'), '_', '-'))
+       FROM users
+       WHERE users.id = profiles.user_id;
+          </code></pre>
+          <p>5 minutes Postgres vs 2 months FriendlyId</p>
+          <br/>
+          <p>(not always possible that easy)</p>
+        </section>
+        <section>
+          <p>If not sure why Postgres chooses to do sequential scan instead of index check it.</p>
+          <code><pre>
+            SET enable_seqscan = false ;
+            EXPLAIN ANALYZE SELECT code FROM country;
+
+ ------------------------------------------------------------------------------
+ Bitmap Heap Scan on country  (cost=3.80..11.19 rows=239 width=4) (actual time=
+ ------------------------------------------------------------------------------
+   ->  Bitmap Index Scan on country_pkey  (cost=0.00..3.74 rows=239 width=0) (a
+ ------------------------------------------------------------------------------
+ Total runtime: 0.202 ms
+          </pre></code>
+          <code><pre>
+            SET enable_seqscan = true ;
+            EXPLAIN ANALYZE SELECT code FROM country;
+
+ -------------------------------------------------------------------------------
+ Seq Scan on country  (cost=0.00..7.39 rows=239 width=4) (actual time=0.012..0.0
+ -------------------------------------------------------------------------------
+ Total runtime: 0.116 ms
+          </pre></code>
+          <p>Usually Postgres knows better. Seq scan was really faster.</p>
+        </section>
+        <section>
+          <p>Query Planner can go wrong:</p>
+          <p><a href="http://meta.genius.com/Rap-genius-engineering-team-one-weird-trick-to-make-postgresql-15000x-faster-annotated">http://meta.genius.com/Rap-genius-engineering-team-one-weird-trick-to-make-postgresql-15000x-faster-annotated</a></p>
+        </section>
+      </section>
+			</div>
+	</div>
+	<script src="lib/js/head.min.js"></script>
+	<script src="js/reveal.min.js"></script>
+
+	<script>
+		// Required, even if empty.
+		Reveal.initialize({
+      dependencies: [
+        { src: 'plugin/highlight/highlight.js', async: true, callback: function() { hljs.initHighlightingOnLoad(); } },
+        { src: 'plugin/markdown/marked.js', condition: function() { return !!document.querySelector( '[data-markdown]' ); } },
+        { src: 'plugin/markdown/markdown.js', condition: function() { return !!document.querySelector( '[data-markdown]' ); } }
+      ],
+      history: true
+		});
+	</script>
+</body>
+</html>
